@@ -9,4 +9,4 @@ then activate it
 
 then install requirements 
 
-python3 main.py 
+python3 -m colab_leecher
