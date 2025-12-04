@@ -7,7 +7,7 @@ import logging
 from time import time
 from datetime import datetime
 from asyncio import sleep
-from os import makedirs, path as ospath, system
+from os import makedirs, path as ospath, system, listdir
 from colab_leecher import OWNER, colab_bot, DUMP_ID
 from colab_leecher.downloader.manager import calDownSize, get_d_name, downloadManager
 from colab_leecher.utility.helper import (
@@ -20,6 +20,7 @@ from colab_leecher.utility.helper import (
     is_ytdl_link,
     is_mega,
     is_terabox,
+    sizeUnit,
     is_torrent,
 )
 from colab_leecher.utility.handler import (
@@ -102,9 +103,9 @@ async def taskScheduler():
                 ida = "🧲"
                 Messages.caution_msg = "\n\n⚠️<i><b> Torrents Are Strictly Prohibited in Google Colab</b>, Try to avoid Magnets !</i>"
             elif is_ytdl_link(link):
-                ida = "🏮"
+                ida = "🮐"
             elif is_terabox(link):
-                ida = "🍑"
+                ida = "💾"
             elif is_mega(link):
                 ida = "💾"
             else:
@@ -153,7 +154,7 @@ async def taskScheduler():
         photo=img,
         caption=Messages.task_msg
         + Messages.status_head
-        + f"\n📝 __Starting DOWNLOAD...__"
+        + f"\n📍 __Starting DOWNLOAD...__"
         + sysINFO(),
         reply_markup=keyboard(),
     )
@@ -185,20 +186,108 @@ async def Do_Leech(source, is_dir, is_ytdl, is_zip, is_unzip, is_dualzip):
                 logging.error("Provided directory does not exist !")
                 await cancelTask("Provided directory does not exist !")
                 return
-            Paths.down_path = s
-            if is_zip:
-                await Zip_Handler(Paths.down_path, True, False)
-                await Leech(Paths.temp_zpath, True)
-            elif is_unzip:
-                await Unzip_Handler(Paths.down_path, False)
-                await Leech(Paths.temp_unzip_path, True)
-            elif is_dualzip:
-                await Unzip_Handler(Paths.down_path, False)
-                await Zip_Handler(Paths.temp_unzip_path, True, True)
-                await Leech(Paths.temp_zpath, True)
+            
+            # Check if it's a directory or a single file
+            if ospath.isdir(s):
+                # Get all items (files and folders) in the directory
+                items = listdir(s)
+                
+                if is_zip:
+                    # Process each item individually and zip it
+                    for item in items:
+                        item_path = ospath.join(s, item)
+                        Messages.download_name = item
+                        
+                        if ospath.isfile(item_path):
+                            file_size = ospath.getsize(item_path)
+                            # Skip zipping for small files (< 10MB) - just upload directly
+                            if file_size < 30 * 1024 * 1024:
+                                logging.info(f"Skipping zip for small file: {item} ({sizeUnit(file_size)})")
+                                Transfer.total_down_size = file_size
+                                makedirs(Paths.temp_dirleech_path, exist_ok=True)
+                                shutil.copy(item_path, Paths.temp_dirleech_path)
+                                await Leech(Paths.temp_dirleech_path, True)
+                            else:
+                                # For larger files, copy to temp directory and zip
+                                temp_item_dir = ospath.join(Paths.temp_dirleech_path, item)
+                                makedirs(temp_item_dir, exist_ok=True)
+                                shutil.copy(item_path, temp_item_dir)
+                                await Zip_Handler(temp_item_dir, True, True)
+                                await Leech(Paths.temp_zpath, True)
+                                # Clean up temp directory
+                                if ospath.exists(temp_item_dir):
+                                    shutil.rmtree(temp_item_dir)
+                        elif ospath.isdir(item_path):
+                            # For directories, always zip them
+                            await Zip_Handler(item_path, True, False)
+                            await Leech(Paths.temp_zpath, True)
+                            
+                elif is_unzip:
+                    # Process each item individually and unzip if applicable
+                    for item in items:
+                        item_path = ospath.join(s, item)
+                        Messages.download_name = item
+                        
+                        if ospath.isfile(item_path):
+                            temp_item_dir = ospath.join(Paths.temp_dirleech_path, item)
+                            makedirs(temp_item_dir, exist_ok=True)
+                            shutil.copy(item_path, temp_item_dir)
+                            await Unzip_Handler(temp_item_dir, True)
+                            await Leech(Paths.temp_unzip_path, True)
+                            # Clean up temp directory
+                            if ospath.exists(temp_item_dir):
+                                shutil.rmtree(temp_item_dir)
+                        elif ospath.isdir(item_path):
+                            await Unzip_Handler(item_path, False)
+                            await Leech(Paths.temp_unzip_path, True)
+                            
+                elif is_dualzip:
+                    # Process each item individually: unzip then zip
+                    for item in items:
+                        item_path = ospath.join(s, item)
+                        Messages.download_name = item
+                        
+                        if ospath.isfile(item_path):
+                            temp_item_dir = ospath.join(Paths.temp_dirleech_path, item)
+                            makedirs(temp_item_dir, exist_ok=True)
+                            shutil.copy(item_path, temp_item_dir)
+                            await Unzip_Handler(temp_item_dir, True)
+                            await Zip_Handler(Paths.temp_unzip_path, True, True)
+                            await Leech(Paths.temp_zpath, True)
+                            # Clean up temp directory
+                            if ospath.exists(temp_item_dir):
+                                shutil.rmtree(temp_item_dir)
+                        elif ospath.isdir(item_path):
+                            await Unzip_Handler(item_path, False)
+                            await Zip_Handler(Paths.temp_unzip_path, True, True)
+                            await Leech(Paths.temp_zpath, True)
+                else:
+                    # Normal mode: process each item individually without zipping
+                    for item in items:
+                        item_path = ospath.join(s, item)
+                        Messages.download_name = item
+                        
+                        if ospath.isfile(item_path):
+                            Transfer.total_down_size = ospath.getsize(item_path)
+                            makedirs(Paths.temp_dirleech_path, exist_ok=True)
+                            shutil.copy(item_path, Paths.temp_dirleech_path)
+                            await Leech(Paths.temp_dirleech_path, True)
+                        elif ospath.isdir(item_path):
+                            Transfer.total_down_size = getSize(item_path)
+                            await Leech(item_path, False)
             else:
-                if ospath.isdir(s):
-                    await Leech(Paths.down_path, False)
+                # Single file processing (existing behavior)
+                Paths.down_path = s
+                if is_zip:
+                    await Zip_Handler(Paths.down_path, True, False)
+                    await Leech(Paths.temp_zpath, True)
+                elif is_unzip:
+                    await Unzip_Handler(Paths.down_path, False)
+                    await Leech(Paths.temp_unzip_path, True)
+                elif is_dualzip:
+                    await Unzip_Handler(Paths.down_path, False)
+                    await Zip_Handler(Paths.temp_unzip_path, True, True)
+                    await Leech(Paths.temp_zpath, True)
                 else:
                     Transfer.total_down_size = ospath.getsize(s)
                     makedirs(Paths.temp_dirleech_path, exist_ok=True)
